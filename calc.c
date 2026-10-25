@@ -2,8 +2,8 @@
 // Student ID: 251ADB250
 // https://github.com/Gulka2008/calc-lab-home
 // Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
-// Resources used:ChatGPT, Cloude, Ortus
-
+// Resources used: Ortus, Claude AI promt "i created calc.c, and opened files, now tell me what i need to write codes" with the lab handout and calc-tests.zip attached. https://claude.ai/share/36f80145-223d-4afd-ab3e-9a72067e842a
+// Claude wrote this function. I get it as: it reads the file one character at a time, skips spaces and tabs, and remembers where each token starts so errors can show the position.
 #define _POSIX_C_SOURCE 200809L
  
 #include <dirent.h>
