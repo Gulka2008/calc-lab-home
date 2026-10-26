@@ -15,12 +15,16 @@
 #include <string.h>
 #include <sys/stat.h>
  
+// My details. They go into the output file names: <input>_<name>_<lastname>_<id>.txt
+
 #define STUDENT_NAME "Gulnara"
 #define STUDENT_LASTNAME "Akbarli"
 #define STUDENT_ID "251ADB250"
  
+// so I allow 2000 and report an error after that instead of crashing.
 #define MAX_DEPTH 2000
  
+// Small helper: is this character a digit 0-9?
 #define IS_DIGIT(c) ((c) >= '0' && (c) <= '9')
  
 static void *xmalloc(size_t n) {
@@ -31,7 +35,8 @@ static void *xmalloc(size_t n) {
     }
     return p;
 }
- 
+
+// Same idea for realloc (make a buffer bigger).
 static void *xrealloc(void *old, size_t n) {
     void *p = realloc(old, n ? n : 1);
     if (!p) {
@@ -59,6 +64,10 @@ static Value make_float(double d) {
  
 static double as_double(Value v) { return v.is_float ? v.d : (double)v.i; }
  
+// The kinds of tokens. A token is one piece of the line: a number, an operator, a bracket.
+// T_EOL means "end of the line" (the \n, or the end of the file). I treat it like a normal token,
+// so "missing operand" and "missing )" errors point at the \n without any special code.
+// T_BAD is any character the calculator does not know (&, #, a letter, a lonely dot ...).
 typedef enum {
     T_INT, T_FLOAT, T_PLUS, T_MINUS, T_STAR, T_SLASH, T_POW, T_LPAREN, T_RPAREN,
     T_EOL,
@@ -72,6 +81,7 @@ typedef struct {
     double fval;
 } Token;
  
+// One operand of a ** chain, used by parse_power(). I also keep where the ** in front of it and the operand itself started, because errors are reported at those places.
 typedef struct {
     Value val;
     size_t oppos;
@@ -92,6 +102,7 @@ typedef struct {
     size_t out_len, out_cap;
 } Parser;
  
+// We read from left to right and stop immediately, so the first error is always the one reported.
 static _Noreturn void fail(Parser *p, size_t off) {
     p->err_pos = off + 1;
     longjmp(p->fail, 1);
@@ -150,6 +161,8 @@ static void next_token(Parser *p) {
     case '/': t->kind = T_SLASH; break;
     case '(': t->kind = T_LPAREN; break;
     case ')': t->kind = T_RPAREN; break;
+    // "**" is ONE token. "* *" with a space are two separate stars, so for "2 * * 3" the
+    // second star is reported as "two operators in a row".
     case '*':
         if (i + 1 < n && b[i + 1] == '*') {
             t->kind = T_POW;
@@ -178,9 +191,11 @@ static Value apply_add_sub_mul(Parser *p, TokKind op, Value a, Value b, size_t o
     return make_float(r);
 }
  
+// For two integers, C's / cuts toward zero, which is what the lab asks for (-7 / 2 = -3).
 static Value apply_div(Parser *p, Value a, Value b, size_t oppos, size_t rstart) {
     if (!a.is_float && !b.is_float) {
         if (b.i == 0) fail(p, rstart);
+        // Dividing the smallest long long by -1 would crash the CPU, so -1 is handled separately.
         if (b.i == -1) return make_int((long long)(0ULL - (unsigned long long)a.i));
         return make_int(a.i / b.i);
     }
@@ -191,6 +206,7 @@ static Value apply_div(Parser *p, Value a, Value b, size_t oppos, size_t rstart)
     return make_float(r);
 }
  
+
 static Value apply_pow(Parser *p, Value a, Value b, size_t oppos, size_t rstart) {
     if (!a.is_float && !b.is_float) {
         if (b.i < 0) fail(p, rstart);
@@ -209,6 +225,8 @@ static Value apply_pow(Parser *p, Value a, Value b, size_t oppos, size_t rstart)
  
 static Value parse_expr(Parser *p);
  
+// The smallest piece: a number, or an expression inside brackets.
+// There is no case for '-', which is why unary minus ("-5") is an error.
 static Value parse_primary(Parser *p) {
     Token t = p->cur;
     if (t.kind == T_INT) {
@@ -231,6 +249,8 @@ static Value parse_primary(Parser *p) {
     fail(p, t.start);
 }
  
+// Combining happens only after the whole chain was read, so a syntax error later in the chain
+// is found before an arithmetic error earlier in it, same as with the recursive version.
 static Value parse_power(Parser *p) {
     size_t base = p->nstack;
  
@@ -400,6 +420,8 @@ static int ensure_dir(const char *path) {
     return 0;
 }
  
+// Does everything for one input file: read, evaluate, write <outdir>/<base>_<name>_<lastname>_<id>.txt.
+// I read the input BEFORE creating the output folder, so a missing input file doesn't leave an
 static int process_file(const char *input, const char *outdir, int outdir_ready) {
     size_t len = 0;
     char *buf = read_file(input, &len);
@@ -430,6 +452,7 @@ static int process_file(const char *input, const char *outdir, int outdir_ready)
             rc = 1;
         } else {
             int ok;
+            // An "ERROR:<pos>" result is a normal result, not a program failure, so the exit code stays 0.
             if (err) {
                 ok = fprintf(f, "ERROR:%zu\n", err) > 0;
             } else {
@@ -456,6 +479,8 @@ static int cmp_names(const void *a, const void *b) {
     return strcmp(*(char *const *)a, *(char *const *)b);
 }
  
+// -d mode: take every *.txt file directly inside the folder. Other files and sub-folders are
+// ignored. The names are sorted so the order is always the same.
 static int process_dir(const char *dir, const char *outdir) {
     DIR *d = opendir(dir);
     if (!d) {
@@ -472,6 +497,7 @@ static int process_dir(const char *dir, const char *outdir) {
         struct stat st;
         int regular = stat(path, &st) == 0 && S_ISREG(st.st_mode);
         free(path);
+        // A folder can also be called something.txt; stat tells us if it is a real file.
         if (!regular) continue;
         if (count == cap) {
             cap = cap ? cap * 2 : 16;
@@ -505,6 +531,7 @@ static void usage(void) {
             "       calc [-d DIR | --dir DIR] [-o OUTDIR | --output-dir OUTDIR]\n");
 }
  
+// Returns NULL (with a message) if the value is missing.
 static const char *option_value(int argc, char **argv, int *i, const char *longname) {
     const char *a = argv[*i];
     size_t ln = strlen(longname);
@@ -517,6 +544,8 @@ static const char *option_value(int argc, char **argv, int *i, const char *longn
     return argv[++*i];
 }
  
+// Exit codes: 0 = all fine (even if a file has an ERROR result), 1 = a file or folder problem,
+// 2 = wrong command line.
 int main(int argc, char **argv) {
     const char *dir = NULL, *outdir = NULL, *input = NULL;
  
@@ -552,6 +581,7 @@ int main(int argc, char **argv) {
         return 2;
     }
  
+    // Default output folder when there is no -o: <base>_<name>_<id> in the current folder, where base is the file name without .txt, or (with -d) the name of the folder.
     char *base = make_base(dir ? dir : input, dir == NULL);
     char *default_out = NULL;
     if (!outdir) {
